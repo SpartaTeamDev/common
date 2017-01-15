@@ -3,6 +3,7 @@
 use Doctrine\Common\Cache,
     Doctrine\Common\EventManager,
     Doctrine\Common\Persistence\Mapping\Driver\StaticPHPDriver,
+    Doctrine\DBAL\Types\Type,
     Doctrine\ORM\Configuration,
     Doctrine\ORM\EntityManager,
     Doctrine\ORM\Events,
@@ -66,6 +67,11 @@ class EntityManagerFactory
             $config['user'] = $config['username'];
         }
 
+        if (!isset($config['password']) && isset($config['pass']))
+        {
+            $config['password'] = $config['pass'];
+        }
+
         if (!isset($config['dbname']) && isset($config['database']))
         {
             $config['dbname'] = $config['database'];
@@ -90,8 +96,9 @@ class EntityManagerFactory
                     $config[$config['provider']]['extension']);
             case 'redis':
                 $redis = new \Redis;
-                $redis->connect($config[$config['provider']]['host'], $config[$config['provider']]['port']);
-                $redis->select($config[$config['provider']]['dbindex']);
+                $redis->connect($config[$config['provider']]['host'], $config[$config['provider']]['port'],
+                    $config[$config['provider']]['timeout'], $config[$config['provider']]['retry_interval']);
+                $redis->select($config[$config['provider']]['dbIndex']);
 
                 $cache = new Cache\RedisCache;
                 $cache->setRedis($redis);
@@ -100,7 +107,7 @@ class EntityManagerFactory
             case 'memcached':
                 $memcache = new \Memcache;
                 $memcache->connect($config[$config['provider']]['host'], $config[$config['provider']]['port'],
-                    $config[$config['provider']]['weight']);
+                    $config[$config['provider']]['timeout']);
 
                 $cache = new Cache\MemcacheCache;
                 $cache->setMemcache($memcache);
@@ -122,18 +129,31 @@ class EntityManagerFactory
             $config['proxy_classes']['directory'], $cache);
 
         $configuration->setMetadataDriverImpl(self::getMetadataDriver($configuration, $config['metadata']));
-        $configuration->setCustomNumericFunctions([
-            'ACOS' => 'DoctrineExtensions\Query\Mysql\Acos',
-            'ASIN' => 'DoctrineExtensions\Query\Mysql\Asin',
-            'ATAN' => 'DoctrineExtensions\Query\Mysql\Atan',
-            'ATAN2' => 'DoctrineExtensions\Query\Mysql\Atan2',
-            'COS' => 'DoctrineExtensions\Query\Mysql\Cos',
-            'COT' => 'DoctrineExtensions\Query\Mysql\Cot',
-            'DEGREES' => 'DoctrineExtensions\Query\Mysql\Degrees',
-            'RADIANS' => 'DoctrineExtensions\Query\Mysql\Radians',
-            'SIN' => 'DoctrineExtensions\Query\Mysql\Sin',
-            'TAN' => 'DoctrineExtensions\Query\Mysql\Tan'
-        ]);
+
+        if (isset($config['dql']['datetime_functions']))
+        {
+            $configuration->setCustomDatetimeFunctions((array)$config['dql']['datetime_functions']);
+        }
+
+        if (isset($config['dql']['numeric_functions']))
+        {
+            $configuration->setCustomNumericFunctions((array)$config['dql']['numeric_functions']);
+        }
+
+        if (isset($config['dql']['string_functions']))
+        {
+            $configuration->setCustomStringFunctions((array)$config['dql']['string_functions']);
+        }
+
+        if (isset($config['dql']['mapping_types']))
+        {
+            foreach ($config['dql']['mapping_types'] as $name => $className)
+            {
+                Type::hasType($name) ? Type::overrideType($name, $className) : Type::addType($name, $className);
+            }
+
+            $configuration->setCustomStringFunctions((array)$config['dql']['string_functions']);
+        }
 
         if (null !== $cache)
         {
